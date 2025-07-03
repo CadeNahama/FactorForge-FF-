@@ -50,6 +50,9 @@ class LiveTradingEngine:
         # Initialize Alpaca interface
         self.alpaca = AlpacaTradingInterface(api_key, secret_key, paper)
         
+        # Immediately fetch current positions from Alpaca
+        self.current_positions = self.alpaca.get_current_positions()
+        
         # Initialize components
         self.tickers = get_sp500_tickers()
         self.data_loader = EnhancedDataLoader()
@@ -98,7 +101,6 @@ class LiveTradingEngine:
         
         # State tracking
         self.is_running = False
-        self.current_positions = {}
         self.stop_losses = {}
         self.trailing_stops = {}
         
@@ -124,9 +126,10 @@ class LiveTradingEngine:
             logging.info("[DEBUG] No last rebalance, will trade.")
             return True
 
-        time_since_rebalance = (now - self.last_rebalance).total_seconds() / 60
-        logging.info(f"[DEBUG] Time since last rebalance: {time_since_rebalance} min, interval: {self.rebalance_interval} min")
-        return time_since_rebalance >= self.rebalance_interval
+        # Compare in seconds, not minutes
+        time_since_rebalance = (now - self.last_rebalance).total_seconds()
+        logging.info(f"[DEBUG] Time since last rebalance: {time_since_rebalance} sec, interval: {self.rebalance_interval * 60} sec")
+        return time_since_rebalance >= self.rebalance_interval * 60
     
     def get_market_data(self) -> pd.DataFrame:
         """Get current market data for all tickers using the latest Alpaca SDK"""
