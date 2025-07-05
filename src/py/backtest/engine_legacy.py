@@ -19,12 +19,13 @@ import random
 
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(os.path.dirname(__file__), '../../core'))
 
 # Import our enhanced components
 try:
-    import quant_cpp  # C++ extension
-    from ensemble_ml_system import EnsembleMLSystem
-    from enhanced_data import EnhancedDataLoader, get_sp500_tickers
+    import quant_cpp  # C++ extension; ensure the .so file is in src/py/core or PYTHONPATH and matches your Python version
+    from src.py.core.ensemble_ml_system import EnsembleMLSystem
+    from src.py.core.data import EnhancedDataLoader, get_sp500_tickers
 except ImportError as e:
     print(f"Import error: {e}")
     print("Please ensure all required modules are available")
@@ -139,8 +140,8 @@ class RealisticBacktestSystemV2:
         print("📊 Loading data...")
         data = self.data_loader.download_data(self.tickers, self.start_date, self.end_date)
         
-        if data is None or data.empty:
-            print("❌ Failed to load data")
+        if data is None:
+            print("No data downloaded, exiting.")
             return None
         
         print(f"✓ Data loaded: {data.shape[0]} rows, {data.shape[1]} columns")

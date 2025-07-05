@@ -17,9 +17,12 @@ from zoneinfo import ZoneInfo
 warnings.filterwarnings('ignore')
 
 # Import our components
-from alpaca_trading_interface import AlpacaTradingInterface
-from core.enhanced_data import EnhancedDataLoader, get_sp500_tickers
-from backtest.realistic_backtest_system_v2 import RealisticBacktestSystemV2
+# If alpaca-trade-api is not found, ensure it is installed: pip install alpaca-trade-api
+from src.py.live.alpaca_trading_interface import AlpacaTradingInterface
+from src.py.core.data import EnhancedDataLoader, get_sp500_tickers
+from src.py.backtest.engine import RealisticBacktestSystemV2
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame
 
 # Set up logging
 logging.basicConfig(
@@ -31,13 +34,19 @@ logging.basicConfig(
     ]
 )
 
+# --- TRADING WINDOW CONFIG ---
+# To change the trading window, adjust these times (24h format, NY time)
+TRADING_START = "15:00"  # 3:00 PM NY time
+TRADING_END = "16:00"    # 4:00 PM NY time (market close)
+
 class LiveTradingEngine:
     """
     Live trading engine that runs the statistical arbitrage model in real-time
     """
     
     def __init__(self, api_key: Optional[str] = None, secret_key: Optional[str] = None, 
-                 initial_capital: float = 100000.0, paper: bool = True):
+                 initial_capital: float = 100000.0, paper: bool = True, max_new_positions_per_cycle: int = 5,
+                 max_open_positions: int = 20, max_daily_loss: float = 0.03, max_turnover: float = 0.3):
         """
         Initialize live trading engine
         
@@ -46,6 +55,10 @@ class LiveTradingEngine:
             secret_key: Alpaca secret key
             initial_capital: Initial capital for position sizing
             paper: Whether to use paper trading
+            max_new_positions_per_cycle: Maximum number of new positions to open per trading cycle
+            max_open_positions: Maximum number of open positions
+            max_daily_loss: Maximum daily loss
+            max_turnover: Maximum daily turnover
         """
         # Initialize Alpaca interface
         self.alpaca = AlpacaTradingInterface(api_key, secret_key, paper)
@@ -81,10 +94,11 @@ class LiveTradingEngine:
         self.paper = paper
         
         # Trading schedule
-        self.trading_start = "09:30"
-        self.trading_end = "15:45"  # Stop 15 minutes before close
+        self.trading_start = TRADING_START
+        self.trading_end = TRADING_END
         self.rebalance_interval = 60  # Rebalance every 60 minutes
         self.last_rebalance = None
+        self.ny_tz = ZoneInfo("America/New_York")
         
         # Risk management
         self.max_position_size = 0.05  # 5% max position
@@ -104,75 +118,64 @@ class LiveTradingEngine:
         self.stop_losses = {}
         self.trailing_stops = {}
         
+        # New positions per cycle
+        self.max_new_positions_per_cycle = max_new_positions_per_cycle
+        self.max_open_positions = max_open_positions
+        self.max_daily_loss = max_daily_loss
+        self.max_turnover = max_turnover
+        self.daily_turnover = 0.0
+        self.open_positions = set()
+        
         logging.info(f"Live Trading Engine initialized ({'PAPER' if paper else 'LIVE'} trading)")
         logging.info(f"Initial Capital: ${initial_capital:,.2f}")
         logging.info(f"Tickers: {len(self.tickers)}")
     
     def is_trading_time(self) -> bool:
         """Check if it's trading time (always compare in US/Eastern)"""
-        now = datetime.now(ZoneInfo("America/New_York"))
-        current_time = now.strftime("%H:%M")
-        logging.info(f"[DEBUG] Now (NY): {now}, current_time: {current_time}, trading window: {self.trading_start}-{self.trading_end}")
-
-        if not self.alpaca.is_market_open():
-            logging.info("[DEBUG] Market is not open according to Alpaca.")
-            return False
-
-        if current_time < self.trading_start or current_time > self.trading_end:
-            logging.info(f"[DEBUG] Current time {current_time} is outside trading window.")
-            return False
-
-        if self.last_rebalance is None:
-            logging.info("[DEBUG] No last rebalance, will trade.")
-            return True
-
-        # Compare in seconds, not minutes
-        time_since_rebalance = (now - self.last_rebalance).total_seconds()
-        logging.info(f"[DEBUG] Time since last rebalance: {time_since_rebalance} sec, interval: {self.rebalance_interval * 60} sec")
-        return time_since_rebalance >= self.rebalance_interval * 60
+        now = datetime.now(self.ny_tz)
+        start = datetime.strptime(self.trading_start, "%H:%M").replace(
+            year=now.year, month=now.month, day=now.day, tzinfo=self.ny_tz)
+        end = datetime.strptime(self.trading_end, "%H:%M").replace(
+            year=now.year, month=now.month, day=now.day, tzinfo=self.ny_tz)
+        in_window = start <= now < end
+        if not in_window:
+            logging.info(f"Not trading: current NY time {now.strftime('%H:%M:%S')} is outside trading window {self.trading_start}-{self.trading_end}.")
+        else:
+            logging.info(f"Trading active: current NY time {now.strftime('%H:%M:%S')} is within trading window.")
+        return in_window
     
-    def get_market_data(self) -> pd.DataFrame:
-        """Get current market data for all tickers using the latest Alpaca SDK"""
+    def get_market_data(self):
+        """Fetch latest market data using Alpaca's new SDK (daily bars)"""
         try:
-            from alpaca.data.requests import StockBarsRequest
-            from alpaca.data.timeframe import TimeFrame
-            # Get historical data for the last 300 days
-            end_date = datetime.now().date()
-            start_date = end_date - timedelta(days=300)
-            request_params = StockBarsRequest(
-                symbol_or_symbols=self.tickers,
+            symbols = self.tickers if hasattr(self, 'tickers') else []
+            if not symbols:
+                logging.error("No tickers specified for market data.")
+                return None
+            request = StockBarsRequest(
+                symbol_or_symbols=symbols,
                 timeframe=TimeFrame.Day,
-                start=str(start_date),
-                end=str(end_date)
+                limit=100
             )
-            bars = self.alpaca.data_client.get_stock_bars(request_params)
-            if not bars or not hasattr(bars, 'data') or not bars.data:
-                logging.error(f"No market data received (bars object: {bars})")
-                return pd.DataFrame()
-            # Convert to DataFrame
-            all_records = []
-            for symbol, barlist in bars.data.items():
-                for bar in barlist:
-                    record = bar.copy() if isinstance(bar, dict) else bar.__dict__.copy()
-                    record['symbol'] = symbol
-                    all_records.append(record)
-            df = pd.DataFrame(all_records)
-            if df.empty:
-                logging.error("No market data available after DataFrame conversion")
-                return pd.DataFrame()
-            # Pivot to wide format: one column per ticker per field
-            df['date'] = pd.to_datetime(df['timestamp']).dt.date
-            df = df.pivot(index='date', columns='symbol')
-            # Flatten multi-index columns and standardize to TICKER_Close, TICKER_Open, etc.
-            df.columns = [f"{sym}_{field.capitalize()}" for field, sym in df.columns]
-            df = df.sort_index()
-            logging.info(f"Retrieved market data: {df.shape}")
-            logging.info(f"DataFrame columns: {df.columns.tolist()}")
-            return df
+            bars = self.alpaca.data_client.get_stock_bars(request)
+            data = {}
+            for symbol in symbols:
+                barlist = bars.data.get(symbol, [])
+                if barlist:
+                    data[symbol] = [{
+                        'time': bar.timestamp,
+                        'open': bar.open,
+                        'high': bar.high,
+                        'low': bar.low,
+                        'close': bar.close,
+                        'volume': bar.volume
+                    } for bar in barlist]
+            if not data:
+                logging.error("No market data returned from Alpaca.")
+                return None
+            return data
         except Exception as e:
             logging.error(f"Error getting market data: {e}")
-            import traceback; traceback.print_exc()
-            return pd.DataFrame()
+            return None
     
     def calculate_signals(self, data: pd.DataFrame) -> Dict[str, float]:
         """Calculate trading signals using the robust backtest logic"""
@@ -185,6 +188,22 @@ class LiveTradingEngine:
             signals = self.backtest_system._generate_signals_realistic(data, current_date)
             # Apply live risk management (position limits, etc.)
             filtered_signals = self.apply_live_risk_management(signals)
+            # --- BEGIN ADDED LOGGING ---
+            buy_count = sum(1 for v in filtered_signals.values() if v > 0.001)
+            sell_count = sum(1 for v in filtered_signals.values() if v < -0.001)
+            hold_count = sum(1 for v in filtered_signals.values() if abs(v) <= 0.001)
+            logging.info(f"Signal distribution: {buy_count} BUY, {sell_count} SELL, {hold_count} HOLD/FLAT out of {len(filtered_signals)} total signals")
+            # --- END ADDED LOGGING ---
+            # --- BEGIN CAP NEW POSITIONS LOGIC ---
+            current_positions = self.alpaca.get_current_positions()
+            new_signals = {k: v for k, v in filtered_signals.items() if k not in current_positions and abs(v) > 0.001}
+            if len(new_signals) > self.max_new_positions_per_cycle:
+                # Sort by absolute signal strength, keep only top N
+                top_new = dict(sorted(new_signals.items(), key=lambda item: abs(item[1]), reverse=True)[:self.max_new_positions_per_cycle])
+                # Keep all signals for tickers we already hold, plus the top N new
+                filtered_signals = {k: v for k, v in filtered_signals.items() if k in current_positions or k in top_new}
+                logging.info(f"Capped new positions to {self.max_new_positions_per_cycle} this cycle.")
+            # --- END CAP NEW POSITIONS LOGIC ---
             logging.info(f"Generated signals for {len(filtered_signals)} tickers")
             return filtered_signals
         except Exception as e:
@@ -194,51 +213,42 @@ class LiveTradingEngine:
     def apply_live_risk_management(self, signals: Dict[str, float]) -> Dict[str, float]:
         """Apply risk management for live trading"""
         try:
-            # Get current positions and account info
             current_positions = self.alpaca.get_current_positions()
             account_info = self.alpaca.get_account_info()
-            
             if not account_info:
                 return {}
-            
             portfolio_value = account_info['portfolio_value']
             limited_signals = {}
-            
-            # Combine tickers from signals and current positions
-            all_tickers = set(list(signals.keys()) + list(current_positions.keys()))
-            for ticker in all_tickers:
+            open_positions_count = sum(1 for qty in current_positions.values() if abs(qty) > 0)
+            # Aggressive close logic and risk controls
+            for ticker in set(list(signals.keys()) + list(current_positions.keys())):
                 signal = signals.get(ticker, 0)
-                # Apply position size limit
-                if abs(signal) > self.max_position_size:
-                    signal = np.sign(signal) * self.max_position_size
-                
                 current_position = current_positions.get(ticker, 0)
                 position_value = abs(current_position) * portfolio_value
-                
-                # Apply daily turnover limit
-                if position_value > portfolio_value * self.max_daily_turnover:
+                # Max open positions
+                if open_positions_count >= self.max_open_positions and ticker not in current_positions:
                     continue
-                
-                # Apply stop losses
-                if ticker in self.stop_losses:
-                    current_price = self.get_current_price(ticker)
-                    if current_price:
-                        if signal > 0 and current_price <= self.stop_losses[ticker]:  # Long position
-                            signal = 0  # Close position
-                        elif signal < 0 and current_price >= self.stop_losses[ticker]:  # Short position
-                            signal = 0  # Close position
-                
-                # If signal is zero but we have a position, generate a close signal
+                # Max turnover
+                if self.daily_turnover > self.max_turnover * portfolio_value:
+                    continue
+                # Max daily loss
+                if abs(self.daily_pnl) > self.max_daily_loss * portfolio_value:
+                    logging.warning("Max daily loss reached. No new trades will be opened today.")
+                    continue
+                # Aggressive close: if signal weakens or reverses
+                if abs(current_position) > 0:
+                    if (np.sign(signal) != np.sign(current_position) and abs(signal) > 0.01) or abs(signal) < 0.01:
+                        limited_signals[ticker] = -np.sign(current_position) * self.max_position_size
+                        logging.info(f"[AGGRESSIVE CLOSE] {ticker}: Closing position of {current_position} shares due to weak/reverse signal {signal:.4f}")
+                        continue
+                # Usual close logic
                 if abs(signal) < 0.001 and abs(current_position) > 0:
-                    # Negative of current position to close it
                     limited_signals[ticker] = -np.sign(current_position) * self.max_position_size
                     logging.info(f"[CLOSE] {ticker}: Closing position of {current_position} shares")
                 elif abs(signal) > 0.001:
                     limited_signals[ticker] = signal
                     logging.info(f"[SIGNAL] {ticker}: Signal={signal:.4f}, Position={current_position}")
-            
             return limited_signals
-            
         except Exception as e:
             logging.error(f"Error applying risk management: {e}")
             return {}
@@ -257,39 +267,39 @@ class LiveTradingEngine:
         try:
             if not signals:
                 return []
-            
             # Get current prices
             current_prices = self.alpaca.get_latest_prices(list(signals.keys()))
-            
             if not current_prices:
                 logging.error("No current prices available")
                 return []
-            
-            # Execute trades
-            executed_trades = self.alpaca.execute_trades(signals, current_prices)
-            
+            # Randomize order execution
+            import random
+            items = list(signals.items())
+            random.shuffle(items)
+            randomized_signals = dict(items)
+            # Latency measurement
+            start_time = time.time()
+            executed_trades = self.alpaca.execute_trades(randomized_signals, current_prices)
+            latency = time.time() - start_time
+            logging.info(f"Trade execution latency: {latency:.4f} seconds")
+            # Update turnover
+            for trade in executed_trades:
+                self.daily_turnover += abs(trade['value'])
             # Update stop losses and trailing stops
             for trade in executed_trades:
                 ticker = trade['ticker']
                 side = trade['side']
                 price = trade['price']
-                
                 if side == 'buy':
-                    # Set stop loss for long position
                     self.stop_losses[ticker] = price * (1 - self.stop_loss_pct)
                     self.trailing_stops[ticker] = price * (1 - self.trailing_stop_pct)
                 elif side == 'sell':
-                    # Set stop loss for short position
                     self.stop_losses[ticker] = price * (1 + self.stop_loss_pct)
                     self.trailing_stops[ticker] = price * (1 + self.trailing_stop_pct)
-            
-            # Record trades
             self.trade_history.extend(executed_trades)
             self.total_trades += len(executed_trades)
-            
             logging.info(f"Executed {len(executed_trades)} trades")
             return executed_trades
-            
         except Exception as e:
             logging.error(f"Error executing trades: {e}")
             return []
@@ -326,35 +336,43 @@ class LiveTradingEngine:
         """Run one complete trading cycle"""
         try:
             logging.info("Starting trading cycle...")
-            
             # Check if it's trading time
             if not self.is_trading_time():
                 logging.info("Not trading time, skipping cycle")
                 return
-            
             # Get market data
             data = self.get_market_data()
-            if data.empty:
+            if data is None:
                 logging.error("No market data available")
                 return
-            
+            # Convert dict to DataFrame if needed
+            if isinstance(data, dict):
+                # Flatten the dict of lists into a DataFrame
+                df_list = []
+                for symbol, bars in data.items():
+                    for bar in bars:
+                        bar_copy = bar.copy()
+                        bar_copy['symbol'] = symbol
+                        df_list.append(bar_copy)
+                if df_list:
+                    data = pd.DataFrame(df_list)
+                    if 'time' in data.columns:
+                        data['time'] = pd.to_datetime(data['time'])
+                        data = data.set_index('time')
+                else:
+                    data = pd.DataFrame()
             # Calculate signals
             signals = self.calculate_signals(data)
             if not signals:
                 logging.info("No signals generated")
                 return
-            
             # Execute trades
             executed_trades = self.execute_trades(signals)
-            
             # Update portfolio tracking
             self.update_portfolio_tracking()
-            
             # Update last rebalance time
             self.last_rebalance = datetime.now(ZoneInfo("America/New_York"))
-            
             logging.info(f"Trading cycle completed. Executed {len(executed_trades)} trades")
-            
         except Exception as e:
             logging.error(f"Error in trading cycle: {e}")
     

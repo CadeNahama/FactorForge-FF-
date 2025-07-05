@@ -15,7 +15,10 @@ warnings.filterwarnings('ignore')
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from live_trading_engine import LiveTradingEngine
+from src.py.live.live_trading_engine import LiveTradingEngine
+
+print("DEBUG: ALPACA_API_KEY =", os.environ.get("ALPACA_API_KEY"))
+print("DEBUG: ALPACA_SECRET_KEY =", os.environ.get("ALPACA_SECRET_KEY"))
 
 def setup_environment():
     """Setup environment variables and check requirements"""
@@ -39,11 +42,11 @@ def setup_environment():
     
     # Check for required packages
     try:
-        import alpaca
+        import alpaca_trade_api
         print("✅ Alpaca SDK installed")
     except ImportError:
         print("❌ Alpaca SDK not installed!")
-        print("Install with: pip install alpaca-py")
+        print("Install with: pip install alpaca-trade-api")
         return False
     
     try:

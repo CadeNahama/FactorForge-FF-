@@ -1,0 +1,18 @@
+start_date: '2022-01-01'
+end_date: '2022-12-31'
+symbols:
+  - AAPL
+  - MSFT
+  - SPY
+bar_size: 'daily'
+initial_capital: 1000000
+risk:
+  max_position_size: 0.005
+  max_portfolio_risk: 0.02
+  stop_loss_rate: 0.02
+  take_profit_rate: 0.04
+  max_drawdown_limit: 0.10
+  trailing_stop_rate: 0.01
+  max_open_positions: 10
+  max_trades_per_day: 10
+  max_daily_loss: 0.02 

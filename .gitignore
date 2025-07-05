@@ -1,0 +1,87 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Data files
+*.csv
+*.json
+*.parquet
+*.h5
+*.hdf5
+data/
+logs/
+results/
+
+# API keys and secrets
+.env
+*.key
+config/secrets.yaml
+config/api_keys.yaml
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Trading specific
+*.log
+backtest_results/
+live_trading/
+portfolio_history/
+trade_history/
+
+# C++ build files
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+cmake-build-*/
+
+# Documentation
+docs/_build/
+
+# Temporary files
+*.tmp
+*.temp
