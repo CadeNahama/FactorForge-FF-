@@ -1,53 +1,71 @@
-# Quantitative Trading Algorithm - Modular Backtesting System
+# Sentiment-Driven Trading Pipeline
 
-A sophisticated quantitative trading system with modular architecture, featuring walk-forward backtesting, multi-factor alpha models, and realistic portfolio simulation.
+This project is a clean, modern pipeline for collecting, processing, and analyzing alternative data (Reddit, News, Twitter) for quantitative trading using sentiment analysis and NLP features.
 
-## 🏗️ Architecture
+## Features
+- Collects data from Reddit, News, and Twitter (optional)
+- Cleans and preprocesses text (spaCy)
+- Computes sentiment scores (VADER)
+- Extracts actionable NLP features (tokens, text length, keyword counts, all-caps, punctuation, etc.)
+- Computes rolling sentiment for trend detection
+- Outputs enriched CSVs for ML/alpha models or direct trading signals
 
-### Modular Design
-The system is built with a modular architecture that separates concerns and allows for easy component swapping:
+## Roadmap
+1. **Data Collection**
+    - [x] Reddit, News, Twitter collectors
+2. **Text Preprocessing**
+    - [x] spaCy-based cleaning, tokenization, lemmatization
+3. **Sentiment Analysis**
+    - [x] VADER sentiment scoring
+4. **Feature Engineering**
+    - [x] Text length, keyword counts, all-caps, punctuation
+    - [x] Time features (hour, day, weekend)
+    - [x] Source encoding
+    - [x] Rolling sentiment (signal smoothing)
+5. **Alpha Model Integration**
+    - [ ] Use features in ML or rule-based trading models
+6. **Backtest & Live Trading**
+    - [ ] Integrate with backtest/live trading engine
+7. **Deployment & Automation**
+    - [ ] Schedule collectors, automate pipeline
 
-```
-src/py/
-├── common/                    # Core modules
-│   ├── alpha_models.py       # Signal generation
-│   ├── risk_evaluator.py     # Risk management
-│   ├── execution_handlers.py # Order execution
-│   ├── report_generator.py   # Performance reporting
-│   └── data_pipeline.py      # Data loading
-├── backtest/                 # Backtesting engine
-│   └── engine_modular_backtest.py
-└── live/                     # Live trading (future)
-```
+## Usage
+1. **Set up environment:**
+    ```bash
+    python3 -m venv altdata-venv
+    source altdata-venv/bin/activate
+    pip install -r requirements.txt  # or install dependencies manually
+    ```
+2. **Configure API keys:**
+    - Edit `config/api_keys.yaml` with your Reddit, NewsAPI, and Twitter credentials.
+3. **Collect data:**
+    ```bash
+    python data_collection/reddit_collector.py
+    python data_collection/news_collector.py
+    # python data_collection/twitter_collector.py  # if desired
+    ```
+4. **Add rolling sentiment:**
+    ```bash
+    python src/sentiment/rolling_features.py --input data/raw/news_TSLA_20250707_114023.csv --output data/raw/news_TSLA_rolling.csv --window 5 --group_col news_source_encoding --time_col published_at
+    python src/sentiment/rolling_features.py --input data/raw/reddit_TSLA_20250707_114018.csv --output data/raw/reddit_TSLA_rolling.csv --window 5 --group_col subreddit_source --time_col created_utc
+    ```
+5. **Use enriched CSVs for ML, alpha models, or trading signals.**
 
-### Core Components
+## Directory Structure
+- `src/sentiment/` — NLP, sentiment, and feature engineering modules
+- `data_collection/` — Data collectors for Reddit, News, Twitter
+- `data/raw/` — Output CSVs
+- `config/` — API keys and config
+- `altdata-venv/` — Python virtual environment
 
-#### 1. AlphaModel (AlphaModelRealistic)
-- **Multi-factor signal generation** using momentum, mean reversion, and correlation
-- **Momentum signals:** 5-day, 20-day, 60-day returns + RSI
-- **Mean reversion:** Bollinger Bands, Z-score, trend strength
-- **Correlation:** Rolling correlation with SPY for diversification
-- **ML-ready:** Scaffolded for future machine learning integration
+## Requirements
+- Python 3.9+
+- See `requirements.txt` for dependencies (spaCy, vaderSentiment, pandas, praw, pyyaml, etc.)
 
-#### 2. RiskEvaluator
-- **Position sizing** controls
-- **Price validation** and liquidity checks
-- **Expandable** for stop-loss, drawdown limits, etc.
-
-#### 3. ExecutionHandler (BasicSimulatedExecutionHandler)
-- **Simulated order execution** with mock fills
-- **Position tracking** and cash management
-- **Ready for real execution** integration
-
-#### 4. ReportGenerator (BasicReportGenerator)
-- **Trade logging** and portfolio tracking
-- **Performance metrics** calculation
-- **Summary reporting** with key statistics
-
-#### 5. DataPipeline
-- **Historical data loading** via EnhancedDataLoader
-- **Multi-symbol support** with flexible date ranges
-- **Data preprocessing** and validation
+## Next Steps
+- Integrate with your alpha model or trading engine
+- Experiment with new features and alternative data sources
+- Automate and deploy for live trading
 
 ## 🚀 Features
 
