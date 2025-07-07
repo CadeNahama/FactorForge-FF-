@@ -1,0 +1,18 @@
+twitter:
+  api_key: "API"
+  api_secret: "SECRET"
+  bearer_token: "TOK" 
+
+
+reddit:
+  client_id: "-"
+  client_secret: "-"
+  username: "---"
+  password: "---"
+  user_agent: "---"
+
+newsapi:
+  api_key: "-"
+
+alphavantage:
+  api_key: "-"
