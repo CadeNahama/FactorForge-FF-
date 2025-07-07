@@ -79,8 +79,8 @@ The system calculates and reports:
 
 ### Prerequisites
 ```bash
-pip install -r python/requirements.txt
-```
+  pip install -r python/requirements.txt
+  ```
 
 ### Configuration
 1. Copy `config/config.yaml` and modify parameters:
